@@ -6,16 +6,33 @@ class AquariumApp extends StatefulWidget {
   _AquariumAppState createState() => _AquariumAppState();
 }
 
-class _AquariumAppState extends State<AquariumApp> {
+class _AquariumAppState extends State<AquariumApp> with SingleTickerProviderStateMixin {
   double fishSpeed = 1.0;
   Color selectedColor = Colors.blue;
   List<Fish> fishList = [];
   Random random = Random();
 
+  late AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      duration: const Duration(milliseconds: 16), // Frame-by-frame animation
+      vsync: this,
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
   // Add new fish
   void _addFish() {
     setState(() {
-      fishList.add(Fish(color: selectedColor, speed: fishSpeed));
+      fishList.add(Fish(color: selectedColor, speed: fishSpeed, controller: _controller));
     });
   }
 
@@ -36,7 +53,7 @@ class _AquariumAppState extends State<AquariumApp> {
               border: Border.all(color: Colors.blueAccent),
             ),
             child: Stack(
-              children: fishList.map((fish) => fish.buildFish(random)).toList(),
+              children: fishList.map((fish) => fish.buildFish()).toList(),
             ),
           ),
           // Slider for fish speed
@@ -89,34 +106,60 @@ class _AquariumAppState extends State<AquariumApp> {
 class Fish {
   final Color color;
   final double speed;
-  double leftPosition;
-  double topPosition;
+  final AnimationController controller;
+  late double leftPosition;
+  late double topPosition;
+  late double horizontalDirection;
+  late double verticalDirection;
 
-  Fish({required this.color, required this.speed})
-      : leftPosition = 0.0,
-        topPosition = 0.0;
+  Fish({required this.color, required this.speed, required this.controller}) {
+    // Random start positions
+    leftPosition = Random().nextDouble() * 250;
+    topPosition = Random().nextDouble() * 250;
 
-  // Randomize fish movement
-  void randomizePosition(Random random) {
-    leftPosition = random.nextDouble() * 250; // Keep within 300x300 container bounds
-    topPosition = random.nextDouble() * 250;
+    // Random initial directions (-1 for left/up, 1 for right/down)
+    horizontalDirection = Random().nextBool() ? 1 : -1;
+    verticalDirection = Random().nextBool() ? 1 : -1;
+
+    // Add listener to update fish position based on speed and direction
+    controller.addListener(() {
+      moveFish();
+    });
   }
 
-  // Fish as a moving colored circle
-  Widget buildFish(Random random) {
-    randomizePosition(random);
-    return AnimatedPositioned(
-      duration: Duration(milliseconds: (5000 / speed).round()),
-      left: leftPosition,
-      top: topPosition,
-      child: Container(
-        width: 30,
-        height: 30,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: color,
-        ),
-      ),
+  // Update the fish position and bounce off edges
+  void moveFish() {
+    // Update positions based on speed and direction
+    leftPosition += horizontalDirection * speed;
+    topPosition += verticalDirection * speed;
+
+    // Check for boundaries and reverse direction when hitting an edge
+    if (leftPosition <= 0 || leftPosition >= 270) {  // 270 to keep within 300x300 container
+      horizontalDirection *= -1;
+    }
+    if (topPosition <= 0 || topPosition >= 270) {
+      verticalDirection *= -1;
+    }
+  }
+
+  // Build the fish widget
+  Widget buildFish() {
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (context, child) {
+        return Positioned(
+          left: leftPosition,
+          top: topPosition,
+          child: Container(
+            width: 30,
+            height: 30,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: color,
+            ),
+          ),
+        );
+      },
     );
   }
 }
