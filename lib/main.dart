@@ -1,5 +1,7 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:sqflite/sqflite.dart';
+import 'package:path/path.dart';
 
 class AquariumApp extends StatefulWidget {
   @override
@@ -11,16 +13,38 @@ class _AquariumAppState extends State<AquariumApp> with SingleTickerProviderStat
   Color selectedColor = Colors.blue;
   List<Fish> fishList = [];
   Random random = Random();
-
   late AnimationController _controller;
 
   @override
   void initState() {
     super.initState();
     _controller = AnimationController(
-      duration: const Duration(milliseconds: 16), // Frame-by-frame animation
+      duration: const Duration(milliseconds: 16),
       vsync: this,
     )..repeat();
+
+    // Load settings from database on app launch
+    _loadSettings();
+  }
+
+  Future<void> _loadSettings() async {
+    final dbHelper = DatabaseHelper();
+    final settings = await dbHelper.getSavedSettings(); // Use getSavedSettings
+    if (settings != null) {
+      setState(() {
+        fishSpeed = settings['speed'] ?? 1.0;
+        selectedColor = Color(int.parse(settings['color'] ?? Colors.blue.value.toString()));
+        int fishCount = settings['fish_count'] ?? 0;
+        for (int i = 0; i < fishCount; i++) {
+          _addFish();
+        }
+      });
+    }
+  }
+
+  Future<void> _saveSettings() async {
+    final dbHelper = DatabaseHelper();
+    await dbHelper.insertSettings(fishList.length, fishSpeed, selectedColor.value.toString());
   }
 
   @override
@@ -69,20 +93,19 @@ class _AquariumAppState extends State<AquariumApp> with SingleTickerProviderStat
               });
             },
           ),
-          // Dropdown for selecting fish color
-          DropdownButton<Color>(
-            value: selectedColor,
-            items: [
-              DropdownMenuItem(child: Text("Blue"), value: Colors.blue),
-              DropdownMenuItem(child: Text("Red"), value: Colors.red),
-              DropdownMenuItem(child: Text("Green"), value: Colors.green),
-            ],
-            onChanged: (value) {
-              setState(() {
-                selectedColor = value!;
-              });
-            },
-          ),
+    DropdownButton<Color>(
+  value: selectedColor, // Set the current selected color explicitly
+  items: [
+    DropdownMenuItem(child: Text("Blue"), value: Colors.blue),
+    DropdownMenuItem(child: Text("Red"), value: Colors.red),
+    DropdownMenuItem(child: Text("Green"), value: Colors.green), // Add green
+  ],
+  onChanged: (value) {
+    setState(() {
+      selectedColor = value!;
+    });
+  },
+),
           // Buttons for adding fish and saving settings
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
@@ -92,7 +115,7 @@ class _AquariumAppState extends State<AquariumApp> with SingleTickerProviderStat
                 child: Text("Add Fish"),
               ),
               ElevatedButton(
-                onPressed: () {},
+                onPressed: _saveSettings, // Save settings when pressed
                 child: Text("Save Settings"),
               ),
             ],
@@ -113,28 +136,21 @@ class Fish {
   late double verticalDirection;
 
   Fish({required this.color, required this.speed, required this.controller}) {
-    // Random start positions
     leftPosition = Random().nextDouble() * 250;
     topPosition = Random().nextDouble() * 250;
-
-    // Random initial directions (-1 for left/up, 1 for right/down)
     horizontalDirection = Random().nextBool() ? 1 : -1;
     verticalDirection = Random().nextBool() ? 1 : -1;
 
-    // Add listener to update fish position based on speed and direction
     controller.addListener(() {
       moveFish();
     });
   }
 
-  // Update the fish position and bounce off edges
   void moveFish() {
-    // Update positions based on speed and direction
     leftPosition += horizontalDirection * speed;
     topPosition += verticalDirection * speed;
 
-    // Check for boundaries and reverse direction when hitting an edge
-    if (leftPosition <= 0 || leftPosition >= 270) {  // 270 to keep within 300x300 container
+    if (leftPosition <= 0 || leftPosition >= 270) {
       horizontalDirection *= -1;
     }
     if (topPosition <= 0 || topPosition >= 270) {
@@ -142,7 +158,6 @@ class Fish {
     }
   }
 
-  // Build the fish widget
   Widget buildFish() {
     return AnimatedBuilder(
       animation: controller,
@@ -161,6 +176,54 @@ class Fish {
         );
       },
     );
+  }
+}
+
+class DatabaseHelper {
+  static final DatabaseHelper _instance = DatabaseHelper._internal();
+  static Database? _database;
+
+  factory DatabaseHelper() {
+    return _instance;
+  }
+
+  DatabaseHelper._internal();
+
+  Future<Database> get database async {
+    if (_database != null) return _database!;
+    _database = await _initDatabase();
+    return _database!;
+  }
+
+  Future<Database> _initDatabase() async {
+    String path = join(await getDatabasesPath(), 'aquarium.db');
+    return await openDatabase(
+      path,
+      version: 1,
+      onCreate: (db, version) {
+        return db.execute(
+          'CREATE TABLE settings(id INTEGER PRIMARY KEY, fish_count INTEGER, speed REAL, color TEXT)',
+        );
+      },
+    );
+  }
+
+  Future<void> insertSettings(int fishCount, double speed, String color) async {
+    final db = await database;
+    await db.insert(
+      'settings',
+      {'fish_count': fishCount, 'speed': speed, 'color': color},
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<Map<String, dynamic>?> getSavedSettings() async {
+    final db = await database;
+    final List<Map<String, dynamic>> maps = await db.query('settings');
+    if (maps.isNotEmpty) {
+      return maps.first;
+    }
+    return null;
   }
 }
 
